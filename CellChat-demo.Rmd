@@ -1,0 +1,42 @@
+---
+title: "CellChat-demo"
+author: "Anan"
+date: "2024-03-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r}
+library(Seurat)
+library(tidyverse)
+library(CellChat)
+options(stringsAsFactors = FALSE)
+```
+
+## Load dataset
+
+```{r}
+scRNA <- readRDS('seuratObj1.rds')
+cellchat <- createCellChat(object = scRNA,
+                           meta = scRNA@meta.data,
+                           group.by = 'celltype')
+```
+
+```{r}
+cellchat
+CellChatDB <- CellChatDB.human
+showDatabaseCategory(CellChatDB)
+CellChatDB.use <- subsetDB(CellChatDB, search = 'Secreted Signaling')
+cellchat@DB <- CellChatDB.use
+```
+
