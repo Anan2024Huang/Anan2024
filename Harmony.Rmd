@@ -1,0 +1,139 @@
+---
+title: "Harmony_Seurat"
+author: "Anan"
+date: "2024-03-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r}
+library(Seurat)
+library(dplyr)
+library(tidyverse)
+library(patchwork)
+library(devtools)
+
+```
+
+
+```{r}
+#install.packages('Rcpp')
+```
+
+
+
+```{r}
+library(Rcpp)
+library(harmony)
+```
+
+
+```{r}
+#install.packages("harmony")
+```
+
+
+```{r}
+#Read file
+data1 <- readRDS(file = "stim_seurat.rds")
+data2 <- readRDS(file = "ctrl_seurat.rds")
+```
+
+```{r}
+## 数据变成List
+Data <- list(data1, data2)
+```
+
+
+```{r}
+#Merge data
+
+scobj <- merge(x=Data[[1]], y = Data[-1], project = "pbmc")
+```
+
+```{r}
+### 主要PercentageFeatureSet函数计算线粒体含量
+### 人类使用pattern = "^MT-"，小鼠使用pattern = "^mt-"
+scobj[["percent.mt"]] <- PercentageFeatureSet(scobj, pattern = "^MT-")
+```
+
+```{r}
+### 质控数据可视化，使用VlnPlot函数
+### nFeature_RNA,  每个细胞中有多少个基因
+### nCount_RNA, 每个细胞中有多少个counts
+### percent.mt, 每个细胞中线粒体基因的比例
+VlnPlot(scobj, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+
+
+```{r}
+### 正式筛选，筛选的是细胞，最终细胞减少
+### nFeature_RNA > 200
+### nFeature_RNA < 2500
+### percent.mt < 5
+scobj <- subset(scobj, subset = nFeature_RNA > 500 & nFeature_RNA < 2500 & percent.mt < 5)
+```
+
+
+```{r}
+scobj <- NormalizeData(scobj)
+scobj <- FindVariableFeatures(scobj, selection.method = "vst", nfeatures = 2000)
+scobj <- ScaleData(scobj, features = rownames(scobj))
+scobj <- RunPCA(scobj, features = VariableFeatures(object = scobj),reduction.name = "pca")
+### 不进行批次矫正
+scobj <- RunUMAP(scobj,reduction = "pca", dims = 1:10, reduction.name = "umap_naive")
+### 使用harmony进行批次矫正
+### 默认reduction = "pca",group.by.vars参数输入的是批次信息,reduction.save 是结果保存的名称
+scobj <- RunHarmony(scobj,reduction = "pca",group.by.vars = "group",reduction.save = "harmony")
+scobj <- RunUMAP(scobj, reduction = "harmony", dims = 1:30,reduction.name = "umap")
+
+p1 <- DimPlot(scobj, reduction = "umap_naive",group.by = "group")
+p2 <- DimPlot(scobj, reduction = "umap",group.by = "group")
+p1+p2
+```
+
+
+```{r}
+scobj <- FindNeighbors(scobj, reduction = "harmony", dims = 1:30)
+### 设置多个resolution选择合适的resolution
+scobj <- FindClusters(scobj, resolution = seq(0.2,1.2,0.1))
+
+### 多个分辨率的分群信息会保存在metadata中
+metadata <- scobj@meta.data
+#install.packages('clustree')
+library(clustree)
+clustree(scobj)
+
+```
+
+```{r}
+###选定分辨率0.5作为分群
+scobj@meta.data$seurat_clusters<- scobj@meta.data$RNA_snn_res.0.5
+Idents(scobj)<- "seurat_clusters"
+
+###作图展示
+DimPlot(scobj, reduction = "umap", label =T)
+
+###group.by,在一张图中展示多个信息
+DimPlot(scobj, reduction="umap",group.by = "group")
+###split.by, 分成多个信息来展示
+DimPlot(scobj, reduction = "umap",split.by="group")
+
+```
+
+```{r}
+scobj
+data1
+data2
+```
+
