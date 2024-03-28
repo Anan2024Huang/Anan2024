@@ -1,0 +1,168 @@
+---
+title: "DoubletFinder"
+author: "Anan"
+date: "2024-03-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r}
+# download DoubletFinder package
+devtools::install_github('chris-mcginnis-ucsf/DoubletFinder')
+```
+
+```{r}
+# set the package
+library(DoubletFinder)
+```
+
+# download demo data
+https://www.ncbi.nlm.nih.gov/geo/download/?acc=GSM5225906&format=file&file=GSM5225906%5Fs200929N8%2Eexpression%5Fmatrix%2Etxt%2Egz    
+
+```{r}
+# Read data
+data <- read.table(file="GSM5225906_s200929N8.expression_matrix.txt.gz")
+```
+
+
+```{r}
+# set Seurat
+library(Seurat)
+
+# install.packages('SeuratObject')
+```
+
+
+```{r}
+# Set dplyr package
+# library(dplyr)
+```
+
+
+```{r}
+# Seurat analysis
+
+# scRNA <- CreateSeuratObject(counts = data, min.cells = 3,min.features = 200, project = "kidney")
+# scRNA <- SCTransform(scRNA)
+#  <- RunPCA(scRNA, verbose = F)
+# scRNA <- RunUMAP(scRNA, dims = 1:15)
+# scRNA <- FindNeighbors(scRNA, dims = 1:15) 
+# scRNA <- FindClusters(resolution = 0.6)
+```
+此时需要确定一些参数，比如主成分（PC）的个数、人工双细胞的比例（pN）、最近邻居的比例（pK）和预期的双细胞数量（nExp）。这些参数都会影响DoubletFinder的效果，所以我们要根据自己的数据特点来合理地选择它们。
+
+```{r}
+# 对scRNA这个单细胞对象进行pN-pK参数扫描，以生成人工双细胞并计算每个细胞的pANN值，这一步运行耗时最久
+# sweep.res.list <- paramSweep(scRNA, PCs = 1:15, sct = T)
+```
+
+
+```{r}
+#对参数扫描的结果进行汇总，计算每种pN和pK组合下的双细胞检测指标。这些指标可以用来评估不同参数下的双细胞检测效果，并选择最优的参数。参数GT表示是否提供了真实的双细胞标签，这里没有提供。
+# sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+
+```
+
+
+```{r}
+#对汇总结果按照真实双胞胎比例（BCreal）进行升序排序，并显示排序后的数据框。这可以帮助我们找到双胞胎检测效果最好的参数组合
+# sweep.stats[order(sweep.stats$BCreal),]
+
+```
+
+
+```{r}
+#根据汇总结果找到最优的pK参数值。
+# bcmvn <- find.pK(sweep.stats)
+
+```
+
+```{r}
+#从上一步得到的数据框中提取出全局最优的pK值，也就是使得所有pN下BCmetric最大化的pK值。
+
+# pK_bcmvn <- as.numeric(as.vector(bcmvn$pK[which.max(bcmvn$BCmetric)]))
+
+```
+
+
+```{r}
+#根据单细胞数据的细胞数量来估计双细胞的比例。DoubletRate表示每5000个细胞中有多少个双细胞。这里假设每增加1000个细胞，双细胞比率就增加千分之8，这是一个经验值，可以根据实际情况调整。
+# DoubletRate = ncol(scRNA)*8*1e-6
+```
+
+```{r}
+#估计单细胞数据中同源双细胞的比例。同源双细胞是指由两个或多个相同类型的细胞融合而成的假阳性细胞，它们通常比异源双细胞更难以检测和去除。homotypic.prop表示同源双细胞的比例。函数modelHomotypic会根据给定的聚类标签来模拟生成一些同源双细胞，并计算它们在所有双细胞中所占的比例。
+# homotypic.prop <- modelHomotypic(scRNA$seurat_clusters)
+```
+
+
+```{r}
+#根据估计的双细胞比例和同源双细胞比例来计算期望的异源双细胞数量。异源双细胞是指由两个或多个不同类型的细胞融合而成的假阳性细胞。nExp_poi表示期望的总双细胞数量，它等于估计的双细胞比例DoubletRate乘以单细胞对象scRNA中的总细胞数量nrow(scRNA@meta.data)，并四舍五入取整。nExp_poi.adj表示期望的异源双细胞数量。
+# nExp_poi <- round(DoubletRate*nrow(scRNA@meta.data))
+```
+
+```{r}
+# 使用同源双细胞比例对推算出期望的异源双细胞数量
+# nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+##使用DoubletFinder算法来检测和去除单细胞数据中的异源双细胞。doubletFinder_v3函数会对单细胞对象scRNA进行双细胞检测和鉴定。这个函数有以下参数：PCs：表示要使用的主成分数量，这里是1到15。pN：表示每个细胞被合并成人工异源双细胞的概率，这里是0.25。pK：表示每个细胞的最近邻居数量，这里使用之前计算出来的最优值。nExp：表示期望的总双细胞数量，这里使用之前计算出来的值。
+```
+
+```{r}
+## 运行结果储存在scRNA@meta.data中
+# scRNA <- doubletFinder(scRNA, PCs = 1:15, pN = 0.25, pK = pK_bcmvn, nExp = nExp_poi.adj, reuse.pANN = F, sct = T)
+```
+
+
+```{r}
+#将双细胞剔除后生成新的对象scRNA.singlet，便于我们后续分析
+# scRNA.singlet <- subset(scRNA, subset = DF.classifications_0.25_0.01_129== "Singlet")
+```
+
+
+```{r}
+#在cRNA的metadata中建议一个新的col
+# colnames(cRNA@meta.data)[ncol(cRNA@meta.data)] = 'DoubletFinder'
+
+#统计在col中DoubletFinder与Singlet的数量
+# table(cRNA@meta.data$DoubletFinder)
+```
+
+
+```{r}
+#设置识别行（cells）
+# Idents(cRNA) <- cRNA@meta.data$DoubletFinder
+
+# Idents(cRNA)
+```
+
+
+```{r}
+
+#将Seurat直接分开
+# cRNA_list <- SplitObject(cRNA)
+
+#生成一个新的Seurat格式，只需要Singlet
+# cRNA2 <- cRNA_list$Singlet
+```
+
+```{r}
+#可视化Doublet与Singlet
+# DimPlot(cRNA, reduction = 'umap', pt.size = 2, group.by = 'DoubletFinder')
+```
+
+
+
+
+
+
+
